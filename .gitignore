@@ -24,3 +24,7 @@ local_settings.py
 .idea/
 *.swp
 *.swo
+# Carpetas específicas del proyecto
+propuestas_db/
+propuestas/
+documentos/
