@@ -176,35 +176,76 @@ def generate_coherent_section(params: str) -> str:
         # Crear prompt con guía específica para la sección
         structure_guide = "\n".join([f"- {item}" for item in template["structure"]])
         
-        prompt = f"""
-        Genera la sección "{section_name}" (número {section_number}) para una propuesta técnica profesional.
-        
-        INFORMACIÓN DEL PROYECTO:
-        - Título del proyecto: {metadata.get('titulo_proyecto', 'No especificado')}
-        - Cliente: {metadata.get('cliente', 'No especificado')}
-        - Descripción: {description}
-        
-        ESTRUCTURA RECOMENDADA:
-        {structure_guide}
-        
-        INFORMACIÓN EXTRAÍDA DEL TDR:
-        {tdr_info[:1000]}  # Limitar a 1000 caracteres
-        
-        CONTEXTO DE SECCIONES PREVIAS:
-        {previous_context}
-        
-        INSTRUCCIONES IMPORTANTES:
-        1. Genera SOLO el contenido, sin repetir el encabezado o título.
-        2. Usa un lenguaje técnico y profesional en español.
-        3. NO uses etiquetas <think> o similares.
-        4. NO incluyas caracteres en otros idiomas (como chino o japonés).
-        5. Sé específico y enfócate en los detalles técnicos relevantes.
-        6. Mantén consistencia con las secciones previas.
-        7. Organiza el contenido en párrafos claros y concisos.
-        8. Usa viñetas o listas numeradas cuando sea apropiado.
-        
-        Tu respuesta se insertará directamente en el formato: {template["format"].format(number=section_number, content="[TU CONTENIDO AQUÍ]")}
-        """
+        # Crear prompt específico según el tipo de sección
+        if normalized_section == "objetivos":
+            prompt = f"""
+            Genera la sección "{section_name}" (número {section_number}) para una propuesta técnica profesional.
+            
+            INFORMACIÓN DEL PROYECTO:
+            - Título del proyecto: {metadata.get('titulo_proyecto', 'No especificado')}
+            - Cliente: {metadata.get('cliente', 'No especificado')}
+            - Descripción: {description}
+            
+            ESTRUCTURA RECOMENDADA:
+            {structure_guide}
+            
+            INFORMACIÓN EXTRAÍDA DEL TDR:
+            {tdr_info[:1000]}
+            
+            CONTEXTO DE SECCIONES PREVIAS:
+            {previous_context}
+            
+            INSTRUCCIONES IMPORTANTES:
+            1. Tu respuesta debe proporcionar DOS partes claramente diferenciadas:
+               a) Un OBJETIVO GENERAL (un párrafo que describa el propósito principal)
+               b) Entre 3-5 OBJETIVOS ESPECÍFICOS (presentados como lista con viñetas)
+            2. Usa un lenguaje técnico y profesional en español.
+            3. NO uses etiquetas <think> o similares.
+            4. NO incluyas caracteres en otros idiomas.
+            5. Sé específico y enfócate en los detalles técnicos relevantes.
+            6. Mantén consistencia con las secciones previas.
+            
+            Responde usando el siguiente formato exacto:
+            
+            OBJETIVO GENERAL:
+            [Escribe aquí el objetivo general como un párrafo coherente]
+            
+            OBJETIVOS ESPECÍFICOS:
+            - [Primer objetivo específico]
+            - [Segundo objetivo específico]
+            - [Tercer objetivo específico]
+            - [...]
+            """
+        else:
+            prompt = f"""
+            Genera la sección "{section_name}" (número {section_number}) para una propuesta técnica profesional.
+            
+            INFORMACIÓN DEL PROYECTO:
+            - Título del proyecto: {metadata.get('titulo_proyecto', 'No especificado')}
+            - Cliente: {metadata.get('cliente', 'No especificado')}
+            - Descripción: {description}
+            
+            ESTRUCTURA RECOMENDADA:
+            {structure_guide}
+            
+            INFORMACIÓN EXTRAÍDA DEL TDR:
+            {tdr_info[:1000]}
+            
+            CONTEXTO DE SECCIONES PREVIAS:
+            {previous_context}
+            
+            INSTRUCCIONES IMPORTANTES:
+            1. Genera SOLO el contenido, sin repetir el encabezado o título.
+            2. Usa un lenguaje técnico y profesional en español.
+            3. NO uses etiquetas <think> o similares.
+            4. NO incluyas caracteres en otros idiomas (como chino o japonés).
+            5. Sé específico y enfócate en los detalles técnicos relevantes.
+            6. Mantén consistencia con las secciones previas.
+            7. Organiza el contenido en párrafos claros y concisos.
+            8. Usa viñetas o listas numeradas cuando sea apropiado.
+            
+            Tu respuesta se insertará directamente en el formato: {template["format"].format(number=section_number, content="[TU CONTENIDO AQUÍ]")}
+            """
         
         # Generar el contenido con el LLM
         llm = get_llm()
@@ -216,29 +257,50 @@ def generate_coherent_section(params: str) -> str:
         # Formatear según el template específico de la sección
         if normalized_section == "objetivos":
             # Extraer objetivo general y específicos
-            general_pattern = r"(?:objetivo general|objetivo principal)[:\s]+(.*?)(?=objetivo|$)"
-            specific_pattern = r"(?:objetivos específicos)[:\s]+(.*?)(?=$)"
+            general_objective = ""
+            specific_objectives = ""
             
+            # Patrón para extraer objetivo general
+            general_pattern = r"(?:OBJETIVO GENERAL:|objetivo general:)\s*(.*?)(?=OBJETIVOS ESPECÍFICOS:|objetivos específicos:|$)"
             general_match = re.search(general_pattern, clean_response, re.IGNORECASE | re.DOTALL)
+            
+            if general_match:
+                general_objective = general_match.group(1).strip()
+            else:
+                # Si no encuentra el patrón, buscar el primer párrafo como objetivo general
+                paragraphs = clean_response.split('\n\n')
+                if paragraphs:
+                    general_objective = paragraphs[0].strip()
+            
+            # Si aún no hay objetivo general, usar un valor predeterminado
+            if not general_objective:
+                general_objective = "Implementar una solución técnica eficiente que cumpla con los requisitos establecidos y contribuya al logro de los objetivos del proyecto."
+            
+            # Patrón para extraer objetivos específicos
+            specific_pattern = r"(?:OBJETIVOS ESPECÍFICOS:|objetivos específicos:)\s*(.*?)(?=$)"
             specific_match = re.search(specific_pattern, clean_response, re.IGNORECASE | re.DOTALL)
             
-            general_objective = general_match.group(1).strip() if general_match else clean_response
-            specific_objectives = specific_match.group(1).strip() if specific_match else ""
-            
-            # Si no se encontraron objetivos específicos, buscar bullets o números
-            if not specific_objectives:
+            if specific_match:
+                specific_objectives = specific_match.group(1).strip()
+            else:
+                # Buscar viñetas o listas numeradas
                 bullet_items = re.findall(r'[-•]\s+(.*?)(?=[-•]|$)', clean_response, re.DOTALL)
                 numbered_items = re.findall(r'\d+\.\s+(.*?)(?=\d+\.|$)', clean_response, re.DOTALL)
                 
-                all_items = bullet_items or numbered_items
-                if all_items:
-                    specific_objectives = "\n".join([f"- {item.strip()}" for item in all_items])
+                if bullet_items:
+                    specific_objectives = "\n".join([f"- {item.strip()}" for item in bullet_items])
+                elif numbered_items:
+                    specific_objectives = "\n".join([f"- {item.strip()}" for item in numbered_items])
             
-            # Si aún no hay objetivos específicos, usar todo como general
+            # Si aún no hay objetivos específicos, usar valores predeterminados
             if not specific_objectives:
-                general_objective = clean_response
-                specific_objectives = "- Pendiente de definir objetivos específicos"
+                specific_objectives = """- Analizar y documentar los requisitos específicos del proyecto.
+- Diseñar una arquitectura robusta que soporte los requerimientos funcionales y no funcionales.
+- Implementar la solución siguiendo estándares de calidad y mejores prácticas.
+- Validar el cumplimiento de los requisitos mediante pruebas exhaustivas.
+- Proporcionar documentación completa y capacitación para asegurar la transferencia de conocimiento."""
             
+            # Formatear la sección completa
             formatted_section = template["format"].format(
                 number=section_number,
                 general_objective=general_objective,
@@ -273,7 +335,6 @@ def generate_coherent_section(params: str) -> str:
         
         # Devolver una sección mínima en caso de error
         return f"## {section_number}. {section_name.upper()}\n\n[Esta sección no pudo generarse correctamente. Por favor, revise los logs para más detalles.]"
-
 def clean_section_content(content: str) -> str:
     """
     Limpia el contenido de la sección para eliminar elementos no deseados.
