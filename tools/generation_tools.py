@@ -10,7 +10,7 @@ from langchain_core.tools import tool
 from core.execution_tracker import add_to_execution_path
 from llm.model import get_llm
 import re
-from tools.reference_tools import find_similar_proposals
+
 from tools.crag_tools import get_similar_proposals_context as crag_get_similar_proposals_context
 
 # Configuración del logger
