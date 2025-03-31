@@ -38,6 +38,7 @@ def analyze_tdr(text: str) -> str:
         prompt = (
             "Extrae la siguiente información del TDR (Términos de Referencia):\n"
             "- Título del proyecto\n"
+            "- Cliente o entidad solicitante\n"
             "- Alcance del proyecto\n"
             "- Lista de entregables\n"
             "- Materiales y equipos requeridos\n"
@@ -46,8 +47,8 @@ def analyze_tdr(text: str) -> str:
             "- Plazos y cronogramas\n"
             "- Requisitos técnicos específicos\n"
             "- Criterios de evaluación\n\n"
-            "Responde en formato JSON con claves en español.\n\n"
-            f"TDR:\n{text}"  # Limitar a los primeros 10000 caracteres
+            "Responde en formato JSON con claves en español. Sé específico y concreto.\n\n"
+            f"TDR:\n{text}"
         )
         
         response = llm.invoke(prompt)
@@ -82,7 +83,7 @@ def analyze_tdr(text: str) -> str:
 @tool
 def generate_index(info: str) -> str:
     """
-    Genera un índice para la propuesta técnica basado en la información extraída.
+    Genera un índice detallado para la propuesta técnica basado en la información extraída.
     
     Args:
         info: Información extraída del TDR
@@ -90,50 +91,54 @@ def generate_index(info: str) -> str:
     Returns:
         Índice en formato JSON
     """
-    logger.info("Generando índice para la propuesta técnica")
+    logger.info("Generando índice detallado para la propuesta técnica")
     
     # Registrar en el historial de ejecución
     add_to_execution_path(
         "generate_index",
-        "Generando estructura e índice de la propuesta"
+        "Generando estructura e índice completo de la propuesta"
     )
     
     try:
         llm = get_llm()
         prompt = (
-            "Con la siguiente información extraída del TDR, genera un índice para la propuesta técnica. "
-            "Cada sección debe ser una clave y su valor, una breve descripción de lo que contendrá. "
-            "El índice DEBE incluir obligatoriamente las siguientes secciones según los requisitos del documento proporcionado:\n\n"
-            "1. Introducción y contexto del proyecto\n"
-            "2. Objetivos (general y específicos)\n"
-            "3. Alcance detallado del trabajo\n"
-            "4. Metodología propuesta\n"
-            "5. Plan de trabajo y cronograma\n"
-            "6. Entregables con descripción detallada\n"
-            "7. Recursos humanos y técnicos asignados\n"
-            "8. Gestión de riesgos\n"
-            "9. Plan de calidad\n"
-            "10. Normativas y estándares aplicables\n"
-            "11. Experiencia relevante en proyectos similares\n"
-            "12. Anexos técnicos\n\n"
-            "Devuelve la respuesta únicamente en formato JSON sin ningún texto adicional, sin tags <think>, sin comentarios y sin explicaciones.\n\n"
-            "Información:\n"
+            "Con la siguiente información extraída del TDR, genera un índice DETALLADO para la propuesta técnica. "
+            "El índice debe incluir TODAS las secciones requeridas según el documento PKS-537 RQ-01, "
+            "adaptadas específicamente al proyecto descrito en el TDR.\n\n"
+            "Cada sección debe ser una clave en el JSON, con una descripción ESPECÍFICA de lo que debe contener, "
+            "NO genérica. Las descripciones deben hacer referencia directa a elementos concretos mencionados en el TDR.\n\n"
+            "Las secciones OBLIGATORIAS que debe incluir son:\n"
+            "1. INTRODUCCIÓN Y CONTEXTO: Contexto específico del proyecto y problema a resolver\n"
+            "2. OBJETIVOS: Objetivo general y objetivos específicos claramente definidos\n"
+            "3. ALCANCE DEL TRABAJO: Descripción detallada de lo que incluye y no incluye el proyecto\n"
+            "4. METODOLOGÍA PROPUESTA: Enfoque metodológico específico y justificado\n"
+            "5. PLAN DE TRABAJO Y CRONOGRAMA: Fases, actividades y tiempos concretos\n"
+            "6. ENTREGABLES: Listado detallado de productos a entregar\n"
+            "7. RECURSOS HUMANOS Y TÉCNICOS: Equipo de trabajo y recursos necesarios\n"
+            "8. GESTIÓN DE RIESGOS: Identificación y mitigación de riesgos específicos\n"
+            "9. PLAN DE CALIDAD: Aseguramiento de calidad y estándares aplicables\n"
+            "10. NORMATIVAS Y ESTÁNDARES: Cumplimiento de regulaciones relevantes\n"
+            "11. EXPERIENCIA RELEVANTE: Proyectos similares y capacidades demostradas\n"
+            "12. ANEXOS TÉCNICOS: Documentación complementaria\n\n"
+            "Devuelve la respuesta ÚNICAMENTE en formato JSON válido sin texto adicional, sin tags <think>, "
+            "sin comentarios y sin explicaciones.\n\n"
+            "Información del TDR:\n"
             f"{info}\n\n"
-            "Responde en formato JSON con esta estructura ejemplo:\n"
+            "Formato de respuesta JSON (ejemplo):\n"
             "{\n"
-            "  \"introduccion\": \"Descripción de esta sección...\",\n"
-            "  \"objetivos\": \"Descripción de esta sección...\",\n"
+            "  \"INTRODUCCION_Y_CONTEXTO\": \"Descripción específica adaptada al proyecto...\",\n"
+            "  \"OBJETIVOS_GENERALES\": \"Descripción específica...\",\n"
             "  ...\n"
             "}\n\n"
-            "IMPORTANTE: Responde SOLAMENTE con el JSON, sin ningún otro texto"
+            "IMPORTANTE: Asegúrate de que las descripciones sean ESPECÍFICAS al proyecto descrito en el TDR "
+            "y no frases genéricas que podrían aplicarse a cualquier proyecto."
         )
         
         response = llm.invoke(prompt)
 
-        # Limpieza agresiva para eliminar todo excepto el JSON
+        # Limpieza agresiva para tener un JSON válido
         # 1. Eliminar tags <think> y </think>
         response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
-        response = re.sub(r'<think>.*', '', response, flags=re.DOTALL)  # Por si no hay tag de cierre
         
         # 2. Eliminar cualquier texto antes de la primera llave de apertura
         response = re.sub(r'^[^{]*', '', response)
@@ -147,14 +152,53 @@ def generate_index(info: str) -> str:
         elif "```" in response:
             response = response.split("```")[1].split("```")[0].strip()
 
-        # Registrar para depuración
-        logger.info(f"Respuesta limpia: {response[:200]}...")
-        
         # Validar que sea un JSON válido
         try:
             json_response = json.loads(response)
-            response = json.dumps(json_response)
-            logger.info("JSON válido confirmado")
+            
+            # Asegurar que incluye todas las secciones obligatorias
+            required_sections = [
+                "INTRODUCCION", "OBJETIVOS", "ALCANCE", "METODOLOGIA", 
+                "PLAN_DE_TRABAJO", "ENTREGABLES", "RECURSOS", 
+                "RIESGOS", "CALIDAD", "NORMATIVAS", "EXPERIENCIA", "ANEXOS"
+            ]
+            
+            # Verificar que las secciones obligatorias estén presentes (con coincidencia parcial)
+            missing_sections = []
+            for required in required_sections:
+                found = False
+                for key in json_response.keys():
+                    if required in key.upper().replace(" ", "_"):
+                        found = True
+                        break
+                if not found:
+                    missing_sections.append(required)
+            
+            # Si faltan secciones, añadirlas con descripciones predeterminadas
+            if missing_sections:
+                logger.warning(f"Faltan secciones obligatorias en el índice: {missing_sections}")
+                
+                default_descriptions = {
+                    "INTRODUCCION": "Contexto del proyecto y descripción del problema a resolver",
+                    "OBJETIVOS": "Objetivo general y objetivos específicos del proyecto",
+                    "ALCANCE": "Alcance detallado del trabajo y límites del proyecto",
+                    "METODOLOGIA": "Metodología propuesta para el desarrollo del proyecto",
+                    "PLAN_DE_TRABAJO": "Plan de trabajo y cronograma de actividades",
+                    "ENTREGABLES": "Listado detallado de entregables del proyecto",
+                    "RECURSOS": "Recursos humanos y técnicos asignados al proyecto",
+                    "RIESGOS": "Gestión de riesgos y plan de mitigación",
+                    "CALIDAD": "Plan de aseguramiento de calidad",
+                    "NORMATIVAS": "Normativas y estándares aplicables",
+                    "EXPERIENCIA": "Experiencia relevante en proyectos similares",
+                    "ANEXOS": "Anexos técnicos y documentación complementaria"
+                }
+                
+                for section in missing_sections:
+                    json_response[f"{section}_SECCION"] = default_descriptions[section]
+            
+            # Convertir de nuevo a JSON string
+            response = json.dumps(json_response, ensure_ascii=False)
+            
         except json.JSONDecodeError as e:
             logger.warning(f"La respuesta no es un JSON válido. Intentando reparar... Error: {str(e)}")
             
@@ -162,43 +206,41 @@ def generate_index(info: str) -> str:
             response = re.sub(r',\s*}', '}', response)
             response = re.sub(r',\s*]', ']', response)
             
-            # Asegurar que esté entre llaves
-            if not response.strip().startswith("{"):
-                response = "{" + response
-            if not response.strip().endswith("}"):
-                response = response + "}"
-            
             # Si todo falla, crear un índice predeterminado
             try:
                 json.loads(response)  # Intentar de nuevo después de la reparación
             except json.JSONDecodeError:
                 logger.warning("Reparación fallida. Generando índice predeterminado.")
                 
-                # Generar un índice predeterminado
+                # Crear un índice predeterminado más completo
                 default_index = {
-                    "introduccion": "Introducción y contexto del proyecto",
-                    "objetivos": "Objetivos generales y específicos del proyecto",
-                    "alcance_trabajo": "Alcance detallado del trabajo a realizar",
-                    "metodologia": "Metodología propuesta para el desarrollo del proyecto",
-                    "plan_trabajo_cronograma": "Plan de trabajo y cronograma de actividades",
-                    "entregables": "Entregables con descripción detallada",
-                    "recursos_humanos_tecnicos": "Recursos humanos y técnicos asignados",
-                    "gestion_riesgos": "Gestión de riesgos del proyecto",
-                    "plan_calidad": "Plan de calidad del proyecto"
+                    "INTRODUCCION_Y_CONTEXTO": "Contexto del proyecto y descripción del problema a resolver",
+                    "OBJETIVOS_GENERALES": "Objetivo general del proyecto",
+                    "OBJETIVOS_ESPECIFICOS": "Objetivos específicos detallados del proyecto",
+                    "ALCANCE_DEL_TRABAJO": "Alcance detallado del trabajo, incluyendo lo que está dentro y fuera del alcance",
+                    "METODOLOGIA_PROPUESTA": "Metodología propuesta para el desarrollo del proyecto",
+                    "PLAN_DE_TRABAJO_Y_CRONOGRAMA": "Plan detallado con fases, actividades y tiempos",
+                    "ENTREGABLES": "Listado y descripción detallada de los entregables del proyecto",
+                    "RECURSOS_HUMANOS_Y_TECNICOS": "Equipo de trabajo, roles y recursos técnicos asignados",
+                    "GESTION_DE_RIESGOS": "Identificación de riesgos y estrategias de mitigación",
+                    "PLAN_DE_CALIDAD": "Mecanismos de aseguramiento de calidad y estándares aplicables",
+                    "NORMATIVAS_Y_ESTANDARES_APLICABLES": "Cumplimiento de normativas y estándares relevantes",
+                    "EXPERIENCIA_RELEVANTE": "Experiencia en proyectos similares y capacidades demostradas",
+                    "ANEXOS_TECNICOS": "Documentación técnica complementaria"
                 }
                 
-                response = json.dumps(default_index)
-                logger.info("Índice predeterminado generado con éxito")
-            
+                response = json.dumps(default_index, ensure_ascii=False)
+        
         logger.info(f"Índice generado: {response[:200]}...")
         
         # Registrar éxito
         add_to_execution_path(
             "generate_index_result",
-            "Índice generado exitosamente"
+            "Índice generado exitosamente con todas las secciones requeridas"
         )
         
         return response
+        
     except Exception as e:
         error_message = f"Error al generar índice: {str(e)}"
         logger.error(error_message)
@@ -211,16 +253,20 @@ def generate_index(info: str) -> str:
         
         # Si hay un error, generamos un índice predeterminado en lugar de fallar
         default_index = {
-            "introduccion": "Introducción y contexto del proyecto",
-            "objetivos": "Objetivos generales y específicos del proyecto",
-            "alcance_trabajo": "Alcance detallado del trabajo a realizar",
-            "metodologia": "Metodología propuesta para el desarrollo del proyecto",
-            "plan_trabajo_cronograma": "Plan de trabajo y cronograma de actividades",
-            "entregables": "Entregables con descripción detallada",
-            "recursos_humanos_tecnicos": "Recursos humanos y técnicos asignados",
-            "gestion_riesgos": "Gestión de riesgos del proyecto",
-            "plan_calidad": "Plan de calidad del proyecto"
+            "INTRODUCCION_Y_CONTEXTO": "Contexto del proyecto y descripción del problema a resolver",
+            "OBJETIVOS_GENERALES": "Objetivo general del proyecto",
+            "OBJETIVOS_ESPECIFICOS": "Objetivos específicos detallados del proyecto",
+            "ALCANCE_DEL_TRABAJO": "Alcance detallado del trabajo, incluyendo lo que está dentro y fuera del alcance",
+            "METODOLOGIA_PROPUESTA": "Metodología propuesta para el desarrollo del proyecto",
+            "PLAN_DE_TRABAJO_Y_CRONOGRAMA": "Plan detallado con fases, actividades y tiempos",
+            "ENTREGABLES": "Listado y descripción detallada de los entregables del proyecto",
+            "RECURSOS_HUMANOS_Y_TECNICOS": "Equipo de trabajo, roles y recursos técnicos asignados",
+            "GESTION_DE_RIESGOS": "Identificación de riesgos y estrategias de mitigación",
+            "PLAN_DE_CALIDAD": "Mecanismos de aseguramiento de calidad y estándares aplicables",
+            "NORMATIVAS_Y_ESTANDARES_APLICABLES": "Cumplimiento de normativas y estándares relevantes",
+            "EXPERIENCIA_RELEVANTE": "Experiencia en proyectos similares y capacidades demostradas",
+            "ANEXOS_TECNICOS": "Documentación técnica complementaria"
         }
         
         logger.info("Generando índice predeterminado debido al error")
-        return json.dumps(default_index)
+        return json.dumps(default_index, ensure_ascii=False)

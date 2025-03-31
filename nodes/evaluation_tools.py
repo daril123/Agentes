@@ -18,26 +18,26 @@ logger = logging.getLogger("TDR_Agente_LangGraph")
 
 
 
-
 @tool
 def evaluate_proposal(params_str: str) -> str:
     """
-    Evalúa la propuesta final para validar que cumpla con lo solicitado.
+    Evalúa la propuesta final con criterios específicos del TDR.
     
     Args:
         params_str: String en formato JSON con:
                  - proposal: Texto de la propuesta técnica
                  - tdr_info: Información extraída del TDR
+                 - specific_requirements: Requisitos específicos extraídos (opcional)
         
     Returns:
         Evaluación en formato JSON
     """
-    logger.info("Evaluando la propuesta técnica")
+    logger.info("Evaluando la propuesta técnica con criterios específicos")
     
     # Registrar en el historial de ejecución
     add_to_execution_path(
         "evaluate_proposal",
-        "Verificando calidad y alineación con los requisitos"
+        "Verificando calidad y alineación con requisitos específicos"
     )
     
     try:
@@ -45,10 +45,38 @@ def evaluate_proposal(params_str: str) -> str:
         params = json.loads(params_str)
         proposal = params.get("proposal", "")
         tdr_info = params.get("tdr_info", "")
+        specific_requirements = params.get("specific_requirements", {})
         
         llm = get_llm()
+        
+        # Construir prompt con requisitos específicos
+        requirements_text = ""
+        if specific_requirements:
+            requirements_text = "REQUISITOS ESPECÍFICOS DEL TDR:\n"
+            
+            # Añadir tecnologías específicas
+            if specific_requirements.get("tecnologias_especificas"):
+                tech_list = "\n".join([f"- {tech}" for tech in specific_requirements["tecnologias_especificas"]])
+                requirements_text += f"\nTecnologías específicas mencionadas:\n{tech_list}\n"
+            
+            # Añadir plazos críticos
+            if specific_requirements.get("plazos_criticos"):
+                time_list = "\n".join([f"- {plazo}" for plazo in specific_requirements["plazos_criticos"]])
+                requirements_text += f"\nPlazos críticos:\n{time_list}\n"
+            
+            # Añadir entregables obligatorios
+            if specific_requirements.get("entregables_obligatorios"):
+                deliv_list = "\n".join([f"- {entregable}" for entregable in specific_requirements["entregables_obligatorios"]])
+                requirements_text += f"\nEntregables obligatorios:\n{deliv_list}\n"
+            
+            # Añadir requisitos especiales
+            if specific_requirements.get("requisitos_especiales"):
+                spec_list = "\n".join([f"- {req}" for req in specific_requirements["requisitos_especiales"]])
+                requirements_text += f"\nRequisitos especiales:\n{spec_list}\n"
+        
         prompt = (
-            "Evalúa la siguiente propuesta técnica y verifica que cumpla con los requisitos específicos del documento PKS-537 RQ-01. "
+            "Evalúa DETALLADAMENTE la siguiente propuesta técnica y verifica que cumpla con los requisitos "
+            "específicos del documento PKS-537 RQ-01 y con los requisitos particulares del TDR. "
             "La propuesta debe incluir obligatoriamente estas secciones:\n"
             "1. Introducción y contexto del proyecto\n"
             "2. Objetivos (general y específicos)\n"
@@ -62,18 +90,27 @@ def evaluate_proposal(params_str: str) -> str:
             "10. Normativas y estándares aplicables\n"
             "11. Experiencia relevante en proyectos similares\n"
             "12. Anexos técnicos\n\n"
-            "Verifica que cada sección tenga suficiente detalle y cumpla con los criterios de calidad esperados.\n\n"
-            "Información del TDR:\n"
-            f"{tdr_info}\n\n"
-            "Propuesta Técnica (parcial):\n"
-            f"{proposal[:5000]}...\n\n"  # Limitamos a los primeros 5000 caracteres
+            "Verifica que cada sección tenga suficiente detalle y EVALÚA ESPECÍFICAMENTE:\n"
+            "- Nivel de ESPECIFICIDAD (si usa generalidades o información concreta)\n"
+            "- Alineación con el TDR (si aborda los requisitos específicos mencionados)\n"
+            "- Coherencia entre secciones\n"
+            "- Formato y estructura profesional\n\n"
+            f"{requirements_text}\n\n"
+            "Información general del TDR:\n"
+            f"{tdr_info[:2000]}...\n\n"
+            "Propuesta Técnica (primeras secciones):\n"
+            f"{proposal[:3000]}...\n\n"
             "Responde en formato JSON con los siguientes campos:\n"
             "1. status: 'aprobado', 'aprobado_con_cambios', o 'rechazado'\n"
             "2. puntuacion: valor numérico del 1 al 10\n"
-            "3. fortalezas: lista de puntos fuertes\n"
-            "4. debilidades: lista de puntos débiles\n"
-            "5. recomendaciones: lista de mejoras sugeridas\n"
-            "6. cumplimiento_requisitos: un objeto con cada sección requerida como clave y un booleano indicando si se cumple adecuadamente"
+            "3. fortalezas: lista de puntos fuertes ESPECÍFICOS\n"
+            "4. debilidades: lista de puntos débiles ESPECÍFICOS\n"
+            "5. recomendaciones: lista de mejoras sugeridas CONCRETAS\n"
+            "6. cumplimiento_requisitos: un objeto con cada sección requerida como clave y un booleano indicando si se cumple adecuadamente\n"
+            "7. evaluacion_especificidad: valor numérico del 1 al 10 sobre qué tan específica es la propuesta\n"
+            "8. evaluacion_alineacion: valor numérico del 1 al 10 sobre la alineación con los requisitos del TDR\n\n"
+            "IMPORTANTE: Evalúa con RIGOR y OBJETIVIDAD. Si la propuesta usa principalmente generalidades en lugar "
+            "de información específica del proyecto, debes reflejarlo en tu evaluación."
         )
         
         response = llm.invoke(prompt)
@@ -84,12 +121,12 @@ def evaluate_proposal(params_str: str) -> str:
         elif "```" in response:
             response = response.split("```")[1].split("```")[0].strip()
         
-        logger.info(f"Evaluación completada: {response[:200]}...")
+        logger.info(f"Evaluación detallada completada: {response[:200]}...")
         
         # Registrar éxito
         add_to_execution_path(
             "evaluate_proposal_result",
-            "Evaluación completada exitosamente"
+            "Evaluación detallada completada exitosamente"
         )
         
         return response
@@ -118,8 +155,7 @@ def save_proposal_to_txt(params_str: str) -> str:
     """
     # Extraer propuesta y parámetros
     
-    filename = None
-    tdr_name = None
+    
     
     try:
         # Intentar parsear como JSON
@@ -145,7 +181,7 @@ def save_proposal_to_txt(params_str: str) -> str:
         if title_match:
             tdr_name = title_match.group(1).strip()[:50]  # Limitar longitud
         else:
-            tdr_name = "TDR"  # Nombre genérico si no se encuentra título
+            tdr_name = "SinNombre"
     
     # Sanitizar el nombre del TDR
     import re 
@@ -155,9 +191,9 @@ def save_proposal_to_txt(params_str: str) -> str:
     # Generar nombre de archivo
     current_date = datetime.now().strftime("%Y%m%d%H%M%S")
     
-    # Usar un nombre de archivo predecible con un formato consistente
+    # Usar un nombre de archivo predecible
     if not filename:
-        filename = f"Propuesta_TDR_{current_date}.txt"  # Formato estándar para que Telegram lo encuentre
+        filename = f"Propuesta_{tdr_name}_{current_date}.txt"
     
     # Asegurar que estamos trabajando con solo el nombre del archivo, no la ruta
     base_filename = os.path.basename(filename)
@@ -184,16 +220,11 @@ def save_proposal_to_txt(params_str: str) -> str:
             output_dir = "."
             logger.info(f"Usando directorio actual como alternativa")
         
-        # Usar os.path.join para formar rutas de manera segura
+        # Usar os.path.join para formar rutas de manera segura en diferentes sistemas operativos
         file_path = os.path.join(output_dir, base_filename)
         
-        # Guardar la propuesta
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(proposal)
-        
-        # Importante: Asignar a la variable global para que Telegram pueda encontrarlo
-        
-        filename = base_filename
         
         logger.info(f"Propuesta guardada exitosamente: {file_path}")
         
@@ -214,10 +245,6 @@ def save_proposal_to_txt(params_str: str) -> str:
             with open(backup_path, "w", encoding="utf-8") as f:
                 f.write(proposal)
             
-            # Asignar a la variable global
-            
-            filename = backup_path
-            
             logger.info(f"Propuesta guardada en ubicación alternativa: {backup_path}")
             
             add_to_execution_path(
@@ -236,6 +263,7 @@ def save_proposal_to_txt(params_str: str) -> str:
             )
             
             return f"Error: {error_message}"
+
 @tool
 def generate_proposal_summary(evaluation: str) -> str:
     """
@@ -263,7 +291,7 @@ def generate_proposal_summary(evaluation: str) -> str:
         prompt = (
             "Genera un resumen ejecutivo breve para la propuesta técnica basado en su evaluación. "
             "El resumen debe destacar los puntos fuertes, mencionar áreas de mejora y dar una valoración global. "
-            "Debe ser profesional y objetivo.\n\n"
+            "Debe ser profesional, objetivo y ESPECÍFICO (no genérico).\n\n"
             f"Evaluación:\n{json.dumps(eval_dict, indent=2)}\n\n"
             "El resumen no debe exceder los 500 caracteres."
         )
@@ -290,3 +318,44 @@ def generate_proposal_summary(evaluation: str) -> str:
         )
         
         return f"Error: {error_message}"
+
+def buscar_archivo_mas_cercano():
+    """
+    Busca el archivo de propuesta más reciente.
+    
+    Returns:
+        Ruta al archivo más reciente
+    """
+    # Obtener hora actual
+    hora_actual = datetime.now()
+    
+    # Buscar todos los archivos con el formato específico
+    patron_busqueda = os.path.join("propuestas", "Propuesta_TDR_*.txt")
+    archivos = glob.glob(patron_busqueda)
+    
+    mejor_archivo = None
+    menor_diferencia = float('inf')
+    
+    # Patrón para extraer la fecha y hora del nombre del archivo
+    patron_fecha = re.compile(r'Propuesta_TDR_(\d{14})\.txt$')
+    
+    for archivo in archivos:
+        # Extraer la fecha del nombre del archivo
+        match = patron_fecha.search(archivo)
+        if match:
+            fecha_str = match.group(1)
+            try:
+                # Convertir a objeto datetime
+                fecha_archivo = datetime.strptime(fecha_str, "%Y%m%d%H%M%S")
+                
+                # Calcular diferencia en segundos con la hora actual
+                diferencia = abs((fecha_archivo - hora_actual).total_seconds())
+                
+                # Actualizar si encontramos una diferencia menor
+                if diferencia < menor_diferencia:
+                    menor_diferencia = diferencia
+                    mejor_archivo = archivo
+            except ValueError:
+                continue
+    
+    return mejor_archivo

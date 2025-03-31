@@ -6,10 +6,10 @@ Herramientas para generación de secciones y combinación de la propuesta técni
 
 import json
 import logging
+import re
 from langchain_core.tools import tool
 from core.execution_tracker import add_to_execution_path
 from llm.model import get_llm
-import re
 
 from tools.crag_tools import get_similar_proposals_context as crag_get_similar_proposals_context
 
@@ -19,7 +19,7 @@ logger = logging.getLogger("TDR_Agente_LangGraph")
 @tool
 def generate_section(params: str) -> str:
     """
-    Redacta una sección específica de la propuesta técnica.
+    Redacta una sección específica de la propuesta técnica con contenido preciso y detallado.
     
     Args:
         params: String en formato JSON con los siguientes campos:
@@ -36,56 +36,39 @@ def generate_section(params: str) -> str:
         params_dict = json.loads(params)
         section_name = params_dict.get("section_name", "")
         description = params_dict.get("description", "")
-        info = params_dict.get("info", "")
+        tdr_info = params_dict.get("info", "")
         previous_content = params_dict.get("previous_content", "")
         
-        logger.info(f"Generando sección: {section_name}")
+        logger.info(f"Generando sección específica: {section_name}")
         
         # Registrar en el historial de ejecución
         add_to_execution_path(
             "generate_section",
-            f"Redactando sección: {section_name}"
+            f"Redactando sección detallada: {section_name}"
         )
         
         # Buscar propuestas similares para obtener contexto
-        context = get_similar_proposals_context(section_name, info)
+        context = get_similar_proposals_context(section_name, tdr_info)
         
-        # Guía específica según el tipo de sección (según PKS-537 RQ-01)
-        section_guidance = {
-            "Introducción": "Proporciona contexto del proyecto, antecedentes y justificación. Describe brevemente el problema que se va a resolver.",
-            "Objetivos": "Incluye tanto el objetivo general como los objetivos específicos. Estos deben ser medibles y estar alineados con el alcance del proyecto.",
-            "Alcance": "Detalla claramente los límites del proyecto, qué se incluye y qué no. Enumera de forma precisa los componentes, sistemas o áreas que abarcará el trabajo.",
-            "Metodología": "Describe el enfoque técnico que se utilizará, marcos de trabajo (frameworks), métodos y técnicas específicas. Justifica por qué este enfoque es adecuado.",
-            "Plan de trabajo": "Presenta un cronograma detallado con fases, actividades, duración estimada y dependencias. Incluye hitos clave y puntos de control.",
-            "Entregables": "Enumera todos los productos a entregar con descripciones detalladas, formato, contenido y criterios de aceptación para cada uno.",
-            "Recursos": "Detalla el equipo humano (roles, perfiles, responsabilidades) y recursos técnicos (equipamiento, software, infraestructura) que se asignarán al proyecto.",
-            "Riesgos": "Identifica posibles riesgos, evalúa su impacto y probabilidad, y propone estrategias de mitigación específicas para cada uno.",
-            "Calidad": "Describe los procesos, estándares y métricas que se utilizarán para asegurar la calidad. Incluye procedimientos de verificación y validación.",
-            "Normativas": "Enumera todas las normativas, estándares y regulaciones aplicables al proyecto y explica cómo se asegurará su cumplimiento.",
-            "Experiencia": "Presenta proyectos similares realizados anteriormente, destacando aspectos clave, resultados obtenidos y lecciones aprendidas relevantes para este proyecto.",
-            "Anexos": "Incluye información técnica adicional, diagramas, especificaciones detalladas u otra documentación relevante que respalde la propuesta."
-        }
+        # Extraer información relevante para esta sección específica
+        section_specific_info = extract_section_specific_info(section_name, tdr_info)
         
-        # Buscar guía específica para la sección actual
-        specific_guidance = ""
-        for key, guide in section_guidance.items():
-            if key.lower() in section_name.lower():
-                specific_guidance = f"Guía específica para esta sección: {guide}\n\n"
-                break
-        
-        llm = get_llm()
+        # Crear prompt mejorado para generar contenido específico
         prompt = (
-            f"Redacta la sección de '{section_name}' para la propuesta técnica. "
-            "Utiliza la siguiente descripción como guía:\n"
-            f"{description}\n\n"
-            f"{specific_guidance}"
-            "Adicionalmente, toma en cuenta la siguiente información extraída del TDR:\n"
-            f"{info}\n\n"
+            f"Genera la sección '{section_name}' para una propuesta técnica profesional. "
+            f"Esta sección debe ser ALTAMENTE ESPECÍFICA, basada estrictamente en el TDR, "
+            f"evitando generalidades y lenguaje ambiguo.\n\n"
+            
+            f"DESCRIPCIÓN DE LA SECCIÓN:\n{description}\n\n"
+            
+            f"INFORMACIÓN ESPECÍFICA RELEVANTE DEL TDR:\n{section_specific_info}\n\n"
+            
+            f"TDR COMPLETO (referencia):\n{tdr_info[:1000]}...\n\n"
         )
         
         # Añadir contexto de contenido previo si existe
         if previous_content:
-            prompt += "### Contenido previo de la propuesta:\n"
+            prompt += "CONTENIDO PREVIO DE LA PROPUESTA:\n"
             prompt += previous_content + "\n\n"
             prompt += "Asegúrate de que tu sección sea coherente con el contenido anterior "
             prompt += "y evita repetir información que ya se haya cubierto. "
@@ -93,19 +76,40 @@ def generate_section(params: str) -> str:
         
         # Añadir contexto de propuestas similares si existe
         if context:
-            prompt += "### Contexto de propuestas similares anteriores:\n"
+            prompt += "EJEMPLOS DE PROPUESTAS SIMILARES (referencia):\n"
             prompt += context + "\n\n"
-            prompt += "Usa este contexto como inspiración, pero personaliza el contenido para este proyecto específico.\n\n"
         
+        # Añadir instrucciones específicas según la sección
+        section_guidance = get_section_specific_guidance(section_name)
+        prompt += f"GUÍA ESPECÍFICA PARA ESTA SECCIÓN:\n{section_guidance}\n\n"
+        
+        # Instrucciones críticas para especificidad
         prompt += (
-            "Responde con el texto de la sección en formato profesional y detallado. "
-            "Usa lenguaje técnico apropiado y estructura el contenido en párrafos claros. "
-            "La extensión debe ser proporcional a la importancia de la sección. "
-            "Asegúrate de cumplir con todos los requisitos del documento proporcionado para esta sección. "
-            "Incluye subsecciones numeradas cuando sea apropiado y utiliza viñetas para listas."
+            "INSTRUCCIONES CRÍTICAS:\n"
+            "1. Sé EXTREMADAMENTE ESPECÍFICO y CONCRETO. Evita completamente las generalidades.\n"
+            "2. Usa DATOS REALES extraídos del TDR, no inventes información.\n"
+            "3. Incluye CIFRAS, MÉTRICAS Y DATOS TÉCNICOS precisos cuando sea posible.\n"
+            "4. Para tablas, usa formato markdown con contenido específico y detallado.\n"
+            "5. Para listas, usa viñetas con elementos concretos, no genéricos.\n"
+            "6. Usa un lenguaje técnico y profesional en español.\n"
+            "7. NO uses etiquetas <think> o similares.\n"
+            "8. NO incluyas caracteres en otros idiomas.\n\n"
+            
+            "EVITA ABSOLUTAMENTE:\n"
+            "- Frases genéricas como 'se implementará una metodología adecuada'\n"
+            "- Texto ambiguo como 'varios recursos serán necesarios'\n"
+            "- Menciones vagas como 'se seguirán las mejores prácticas'\n"
+            "- Contenido que podría aplicarse a cualquier proyecto\n\n"
+            
+            "Responde con el texto completo de la sección en formato profesional y detallado."
         )
         
+        # Generar la sección con el LLM
+        llm = get_llm()
         response = llm.invoke(prompt)
+        
+        # Limpiar la respuesta
+        response = clean_section_content(response)
         
         logger.info(f"Sección '{section_name}' generada: {len(response)} caracteres")
         
@@ -128,6 +132,199 @@ def generate_section(params: str) -> str:
         )
         
         return f"Error en sección {section_name}: {error_message}"
+
+def extract_section_specific_info(section_name: str, tdr_info: str) -> str:
+    """
+    Extrae información específica del TDR relevante para la sección.
+    
+    Args:
+        section_name: Nombre de la sección
+        tdr_info: Información extraída del TDR
+        
+    Returns:
+        Información relevante para la sección específica
+    """
+    try:
+        # Verificar si tdr_info es JSON
+        tdr_dict = {}
+        is_json = False
+        try:
+            tdr_dict = json.loads(tdr_info)
+            is_json = True
+        except json.JSONDecodeError:
+            pass
+        
+        # Si no es JSON, usar el texto como está
+        if not is_json:
+            return tdr_info
+        
+        # Mapeo de secciones a campos relevantes
+        section_fields = {
+            "introduccion": ["titulo_proyecto", "cliente", "contexto", "descripcion", "problema"],
+            "objetivos": ["objetivos", "metas", "proposito"],
+            "alcance": ["alcance_proyecto", "limites", "requisitos_tecnicos"],
+            "metodologia": ["metodologia", "enfoque", "procedimientos", "tecnologias"],
+            "plan_trabajo": ["plazos", "cronograma", "actividades", "fases", "etapas"],
+            "entregables": ["entregables", "productos", "deliverables"],
+            "recursos": ["recursos", "personal", "equipo", "materiales_equipos"],
+            "riesgos": ["riesgos", "amenazas", "contingencias"],
+            "calidad": ["calidad", "estandares", "metricas"],
+            "normativas": ["normativas", "regulaciones", "leyes", "estandares"],
+            "experiencia": ["experiencia", "proyectos_similares"],
+            "anexos": ["anexos", "documentacion_adicional"]
+        }
+        
+        # Buscar la mejor coincidencia para la sección
+        matched_section = None
+        for key in section_fields.keys():
+            if key in section_name.lower():
+                matched_section = key
+                break
+        
+        if not matched_section:
+            # Si no hay coincidencia, devolver todos los campos
+            return json.dumps(tdr_dict, indent=2)
+        
+        # Extraer campos relevantes
+        relevant_fields = section_fields[matched_section]
+        section_info = {}
+        
+        for field in tdr_dict.keys():
+            for relevant in relevant_fields:
+                if relevant in field.lower() and tdr_dict[field]:
+                    section_info[field] = tdr_dict[field]
+        
+        if not section_info:
+            return json.dumps(tdr_dict, indent=2)
+        
+        return json.dumps(section_info, indent=2)
+    except Exception as e:
+        logger.error(f"Error al extraer información específica: {str(e)}")
+        return tdr_info
+
+def get_section_specific_guidance(section_name: str) -> str:
+    """
+    Proporciona guía específica para cada tipo de sección.
+    
+    Args:
+        section_name: Nombre de la sección
+        
+    Returns:
+        Guía específica para la sección
+    """
+    section_lower = section_name.lower()
+    
+    guidance = {
+        "introduccion": (
+            "- Menciona específicamente el nombre del proyecto y el cliente\n"
+            "- Describe el contexto real del sector donde se desarrolla\n"
+            "- Explica el problema concreto que aborda el proyecto\n"
+            "- Incluye datos específicos sobre la situación actual"
+        ),
+        "objetivos": (
+            "- Formula objetivos SMART (Específicos, Medibles, Alcanzables, Relevantes, Temporales)\n"
+            "- El objetivo general debe ser un párrafo concreto\n"
+            "- Los objetivos específicos deben ser 3-5 puntos con verbos de acción\n"
+            "- Incluye métricas o indicadores específicos para medir el éxito"
+        ),
+        "alcance": (
+            "- Define claramente QUÉ SE INCLUYE y QUÉ NO SE INCLUYE en el proyecto\n"
+            "- Especifica componentes, módulos o sistemas concretos a desarrollar\n"
+            "- Menciona ubicaciones físicas específicas si aplica\n"
+            "- Detalla las interfaces con otros sistemas existentes"
+        ),
+        "metodologia": (
+            "- Nombra metodologías específicas (no solo términos genéricos como 'ágil')\n"
+            "- Detalla fases concretas con actividades específicas en cada una\n"
+            "- Menciona herramientas y técnicas específicas a utilizar\n"
+            "- Explica cómo se abordarán los desafíos técnicos del proyecto"
+        ),
+        "plan_trabajo": (
+            "- Proporciona un cronograma detallado con fechas o duraciones específicas\n"
+            "- Desglosa tareas principales en subtareas concretas\n"
+            "- Identifica dependencias entre tareas\n"
+            "- Usa formato de tabla para mayor claridad"
+        ),
+        "entregables": (
+            "- Nombra cada entregable con un título específico\n"
+            "- Describe el formato exacto de cada entregable\n"
+            "- Detalla el contenido específico de cada entregable\n"
+            "- Establece criterios concretos de aceptación"
+        ),
+        "recursos": (
+            "- Nombra roles específicos con sus responsabilidades\n"
+            "- Especifica habilidades técnicas requeridas para cada rol\n"
+            "- Detalla hardware y software específicos necesarios\n"
+            "- Cuantifica recursos (horas-persona, capacidad, etc.)"
+        ),
+        "riesgos": (
+            "- Identifica riesgos específicos del proyecto, no genéricos\n"
+            "- Cuantifica la probabilidad e impacto de cada riesgo\n"
+            "- Proporciona estrategias de mitigación concretas\n"
+            "- Incluye planes de contingencia específicos"
+        ),
+        "calidad": (
+            "- Nombra estándares específicos aplicables (ISO, IEEE, etc.)\n"
+            "- Define métricas concretas de calidad con valores objetivo\n"
+            "- Detalla procesos específicos de verificación\n"
+            "- Especifica herramientas para pruebas y QA"
+        ),
+        "normativas": (
+            "- Cita normativas específicas con sus códigos o referencias\n"
+            "- Explica cómo se aplicará cada normativa al proyecto\n"
+            "- Menciona certificaciones requeridas si aplica\n"
+            "- Detalla procesos de conformidad y validación"
+        ),
+        "experiencia": (
+            "- Menciona proyectos anteriores específicos\n"
+            "- Incluye clientes reales o sectores específicos\n"
+            "- Cuantifica resultados obtenidos en proyectos previos\n"
+            "- Destaca tecnologías específicas utilizadas"
+        ),
+        "anexos": (
+            "- Enumera documentos técnicos específicos a incluir\n"
+            "- Describe el contenido de cada anexo\n"
+            "- Menciona diagramas o modelos técnicos específicos\n"
+            "- Referencia estándares utilizados en los anexos"
+        )
+    }
+    
+    # Buscar la mejor coincidencia
+    for key, value in guidance.items():
+        if key in section_lower:
+            return value
+    
+    # Si no hay coincidencia, devolver guía genérica
+    return (
+        "- Sé extremadamente específico, evita generalidades\n"
+        "- Usa datos concretos extraídos del TDR\n"
+        "- Incluye detalles técnicos precisos\n"
+        "- Estructura la información de forma clara y accesible"
+    )
+
+def clean_section_content(content: str) -> str:
+    """
+    Limpia el contenido de la sección para eliminar elementos no deseados.
+    
+    Args:
+        content: Contenido a limpiar
+        
+    Returns:
+        Contenido limpio
+    """
+    # Eliminar etiquetas think
+    content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+    
+    # Eliminar caracteres no latinos (excepto puntuación común)
+    content = re.sub(r'[^\x00-\x7F\xC0-\xFF\u20AC\xA1-\xBF]+', '', content)
+    
+    # Eliminar líneas vacías múltiples
+    content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
+    
+    # Eliminar posibles encabezados que haya generado el LLM
+    content = re.sub(r'^#+\s+.*\n', '', content, flags=re.MULTILINE)
+    
+    return content.strip()
 
 def get_similar_proposals_context(section_name: str, tdr_info: str) -> str:
     """
@@ -167,7 +364,8 @@ def combine_sections(params_str: str) -> str:
         sections = params.get("sections", [])
         
         # Añadir encabezado y título principal
-        current_date = "25 de marzo, 2025"  # Puedes obtener la fecha actual
+        from datetime import datetime
+        current_date = datetime.now().strftime("%d de %B, %Y")
         proposal = f"""# PROPUESTA TÉCNICA
 **Documento: PKS-537 RQ-01**
 **Fecha: {current_date}**

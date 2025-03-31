@@ -16,7 +16,7 @@ from core.state import TDRAgentState
 from core.execution_tracker import reset_execution_path, get_execution_path, execution_path
 from graph.builder import build_tdr_agent
 from visualization.flow_diagram import generar_diagrama_flujo
-from tools.evaluation_tools import generate_proposal_summary , filename
+from tools.evaluation_tools import generate_proposal_summary 
 from langchain_core.messages import SystemMessage
 from config.settings import SYSTEM_PROMPT
 from datetime import datetime
