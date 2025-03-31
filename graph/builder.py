@@ -14,7 +14,7 @@ from nodes.index_node import generate_index_node
 from nodes.section_node import generate_sections_node
 from nodes.combine_node import combine_proposal_node
 from nodes.evaluate_node import evaluate_proposal_node
-
+from nodes.enhanced_section_node import enhanced_generate_sections_node
 # Configuración del logger
 logger = logging.getLogger("TDR_Agente_LangGraph")
 
@@ -34,7 +34,7 @@ def build_tdr_agent():
     workflow.add_node("extract_text", extract_text_node)
     workflow.add_node("analyze_tdr", analyze_tdr_node)
     workflow.add_node("generate_index", generate_index_node)
-    workflow.add_node("generate_sections", generate_sections_node)
+    workflow.add_node("generate_sections", enhanced_generate_sections_node)
     workflow.add_node("combine_proposal", combine_proposal_node)
     workflow.add_node("evaluate_proposal", evaluate_proposal_node)
     logger.info("Nodos añadidos al grafo")

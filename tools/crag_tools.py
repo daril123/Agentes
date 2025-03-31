@@ -346,7 +346,263 @@ class ProposalEmbedding:
             variants.append(clean_name)
         
         return list(set(variants))
+# Configuración del logger
+logger = logging.getLogger("TDR_Agente_LangGraph")
 
+class EnhancedProposalRetrieval:
+    """
+    Versión mejorada del sistema de recuperación de propuestas.
+    """
+    
+    def __init__(self, proposals_dir="documentos/Propuestas", persist_directory="propuestas_db"):
+        """Inicializa el sistema mejorado de recuperación."""
+        self.embedding_system = ProposalEmbedding(proposals_dir, persist_directory)
+        
+        # Asegurar que la base de datos esté indexada
+        if self.embedding_system.vector_db is None:
+            logger.info("Indexando propuestas para el primer uso...")
+            self.embedding_system.index_proposals()
+    
+    def get_section_template(self, section_name: str) -> Dict[str, Any]:
+        """
+        Obtiene una plantilla estandarizada para una sección específica.
+        
+        Args:
+            section_name: Nombre de la sección (ej. "introduccion", "objetivos")
+            
+        Returns:
+            Diccionario con la plantilla de la sección
+        """
+        # Mapeo de nombres de sección a plantillas estándar
+        templates = {
+            "introduccion": {
+                "titulo": "1. INTRODUCCIÓN",
+                "estructura": [
+                    "Contexto del proyecto",
+                    "Descripción del problema/necesidad",
+                    "Propósito de la propuesta",
+                    "Beneficios esperados"
+                ],
+                "formato": "párrafos",
+                "longitud_recomendada": "3-4 párrafos"
+            },
+            "objetivos": {
+                "titulo": "2. OBJETIVOS",
+                "estructura": [
+                    "2.1 OBJETIVO GENERAL",
+                    "2.2 OBJETIVOS ESPECÍFICOS (en viñetas)"
+                ],
+                "formato": "general en párrafo, específicos en viñetas",
+                "longitud_recomendada": "1 párrafo + 3-5 viñetas"
+            },
+            # Añadir plantillas para otras secciones...
+        }
+        
+        # Normalizar el nombre de la sección para la búsqueda
+        normalized_name = section_name.lower().strip()
+        
+        # Obtener la plantilla o una genérica si no existe específica
+        return templates.get(normalized_name, {
+            "titulo": f"{section_name.upper()}",
+            "estructura": ["Información general", "Detalles específicos"],
+            "formato": "párrafos y viñetas según convenga",
+            "longitud_recomendada": "2-3 párrafos"
+        })
+    
+    def clean_retrieved_content(self, content: str) -> str:
+        """
+        Limpia el contenido recuperado para eliminar tags no deseados o texto irrelevante.
+        
+        Args:
+            content: Contenido a limpiar
+            
+        Returns:
+            Contenido limpio
+        """
+        # Eliminar etiquetas <think> y </think> y su contenido
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+        
+        # Eliminar caracteres no latinos (excepto puntuación común)
+        content = re.sub(r'[^\x00-\x7F\xC0-\xFF\u20AC\xA1-\xBF]+', '', content)
+        
+        # Eliminar líneas vacías múltiples
+        content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
+        
+        # Normalizar encabezados de sección (### a ##)
+        content = re.sub(r'^#{3,}\s+', '## ', content, flags=re.MULTILINE)
+        
+        return content.strip()
+    
+    def get_enhanced_context(self, section_name: str, tdr_info: str, num_examples: int = 3) -> Dict[str, Any]:
+        """
+        Obtiene contexto mejorado para generar una sección específica.
+        
+        Args:
+            section_name: Nombre de la sección
+            tdr_info: Información extraída del TDR
+            num_examples: Número de ejemplos a obtener
+            
+        Returns:
+            Diccionario con contexto enriquecido para la generación
+        """
+        # Obtener plantilla de la sección
+        template = self.get_section_template(section_name)
+        
+        # Buscar ejemplos similares
+        similar_proposals = self.embedding_system.search_similar_content(
+            query=f"Sección {section_name}: {tdr_info[:500]}", 
+            section_name=section_name,
+            k=num_examples
+        )
+        
+        # Procesar y limpiar ejemplos
+        cleaned_examples = []
+        for prop in similar_proposals:
+            content = self.clean_retrieved_content(prop.get("section_content", ""))
+            if content:
+                cleaned_examples.append({
+                    "project_name": prop.get("project_name", "Proyecto no especificado"),
+                    "content": content
+                })
+        
+        # Estructurar el contexto enriquecido
+        enhanced_context = {
+            "template": template,
+            "examples": cleaned_examples,
+            "instructions": {
+                "format_guidelines": f"Usar el título '{template['titulo']}' y seguir la estructura recomendada",
+                "content_guidelines": "Mantener coherencia con secciones anteriores y siguientes",
+                "style_guidelines": "Usar lenguaje técnico profesional, evitar repeticiones",
+                "common_mistakes": "Evitar cambios de idioma, etiquetas visibles, o estructura incoherente"
+            }
+        }
+        
+        return enhanced_context
+    
+    def create_section_prompt(self, section_name: str, tdr_info: str, previous_sections: List[str] = None) -> str:
+        """
+        Crea un prompt optimizado para generar una sección específica.
+        
+        Args:
+            section_name: Nombre de la sección
+            tdr_info: Información extraída del TDR
+            previous_sections: Contenido de secciones anteriores (opcional)
+            
+        Returns:
+            Prompt optimizado para el LLM
+        """
+        # Obtener contexto enriquecido
+        context = self.get_enhanced_context(section_name, tdr_info)
+        
+        # Construir el prompt
+        prompt = f"""
+        # Instrucciones para generar la sección '{section_name.upper()}' de la propuesta técnica
+        
+        ## Información del TDR:
+        {tdr_info[:1000]}...
+        
+        ## Formato y estructura requeridos:
+        - Título: {context['template']['titulo']}
+        - Estructura recomendada: {', '.join(context['template']['estructura'])}
+        - Formato: {context['template']['formato']}
+        - Longitud aproximada: {context['template']['longitud_recomendada']}
+        
+        ## Ejemplos de secciones similares en proyectos previos:
+        """
+        
+        # Añadir ejemplos
+        for i, example in enumerate(context['examples']):
+            prompt += f"""
+        ### Ejemplo {i+1} - Proyecto: {example['project_name']}
+        {example['content'][:800]}...
+        """
+        
+        # Añadir contexto de secciones previas si está disponible
+        if previous_sections:
+            prompt += "\n## Secciones previas de esta propuesta (para mantener coherencia):\n"
+            for i, prev_section in enumerate(previous_sections[-2:]):  # Solo las últimas 2 secciones
+                prompt += f"### Sección previa {i+1}:\n{prev_section[:500]}...\n\n"
+        
+        # Añadir instrucciones finales
+        prompt += f"""
+        ## Instrucciones adicionales:
+        1. {context['instructions']['format_guidelines']}
+        2. {context['instructions']['content_guidelines']}
+        3. {context['instructions']['style_guidelines']}
+        4. {context['instructions']['common_mistakes']}
+        
+        IMPORTANTE: Generar SOLAMENTE el contenido de la sección '{section_name}', sin incluir etiquetas <think> o texto en idiomas diferentes al español. Usar numeración coherente con el resto del documento.
+        """
+        
+        return prompt
+
+# Función para integrar con el sistema existente
+def get_enhanced_proposal_context(section_name: str, tdr_info: str, previous_sections: List[str] = None) -> str:
+    """
+    Versión mejorada de la función de recuperación de contexto para propuestas.
+    
+    Args:
+        section_name: Nombre de la sección
+        tdr_info: Información extraída del TDR
+        previous_sections: Contenido de secciones anteriores (opcional)
+        
+    Returns:
+        Prompt optimizado para generar la sección
+    """
+    try:
+        retriever = EnhancedProposalRetrieval()
+        return retriever.create_section_prompt(section_name, tdr_info, previous_sections)
+    except Exception as e:
+        logger.error(f"Error al obtener contexto mejorado: {str(e)}", exc_info=True)
+        # Fallback a la función original en caso de error
+        from tools.crag_tools import get_similar_proposals_context
+        return get_similar_proposals_context(section_name, tdr_info)
+
+# Modificar la función de generación de secciones para utilizar el nuevo sistema
+def enhance_generate_section_tool():
+    """
+    Mejora la herramienta de generación de secciones utilizando el contexto enriquecido.
+    """
+    from tools.generation_tools import generate_section
+    original_function = generate_section.func
+    
+    def enhanced_generate_section(params: str) -> str:
+        try:
+            # Parsear los parámetros
+            params_dict = json.loads(params)
+            section_name = params_dict.get("section_name", "")
+            tdr_info = params_dict.get("info", "")
+            previously_generated = params_dict.get("previous_content", "")
+            
+            # Dividir el contenido previo en secciones
+            previous_sections = []
+            if previously_generated:
+                # Patrón para encontrar secciones por los encabezados
+                sections = re.split(r'##\s+[^\n]+', previously_generated)
+                if len(sections) > 1:  # El primero es vacío
+                    previous_sections = ["##" + s for s in sections[1:]]
+            
+            # Utilizar la nueva función de contexto
+            enhanced_prompt = get_enhanced_proposal_context(
+                section_name, 
+                tdr_info, 
+                previous_sections
+            )
+            
+            # Reemplazar los parámetros originales con el prompt mejorado
+            params_dict["enhanced_context"] = enhanced_prompt
+            
+            # Llamar a la función original con los parámetros enriquecidos
+            return original_function(json.dumps(params_dict))
+        except Exception as e:
+            logger.error(f"Error en enhanced_generate_section: {str(e)}", exc_info=True)
+            # Fallback a la función original
+            return original_function(params)
+    
+    # Reemplazar la función original
+    generate_section.func = enhanced_generate_section
+    
+    return "Herramienta de generación de secciones mejorada con éxito"
 # Función para integrar con el sistema de herramientas
 def find_similar_proposals(params_str: str) -> str:
     """
